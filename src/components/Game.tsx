@@ -1,17 +1,19 @@
 import { observer } from 'mobx-react';
 import { ActionHistory, useStores } from '../stores/GameStore';
-import { characterIcons } from '../icons/CharacterIcons';
-import { BaseSkill, CharacterType, IconType, getSkillDescription } from '../utils/GameLogic';
+import { BaseSkill, CharacterType, EffectType, IconType, getSkillDescription } from '../utils/GameLogic';
+import { characterIcons } from '../icons/characterIcons';
+import { effectIcons } from '../icons/effectIcons';
 
 interface CharacterPortrait {
     iconType: IconType;
     health: number;
     maxHealth: number;
     isValidTarget: boolean;
+    effects: { [key in EffectType]?: number };
     onSelectTarget: () => void;
 }
 
-export const CharacterPortrait = observer(({ iconType, health, maxHealth, isValidTarget, onSelectTarget }: CharacterPortrait) => {
+export const CharacterPortrait = observer(({ iconType, health, maxHealth, isValidTarget, effects, onSelectTarget }: CharacterPortrait) => {
     return (
         <div>
             <div className={`${isValidTarget ? "border border-4 rounded border-gray-300 hover:border-gray-400" : ""}`} onClick={onSelectTarget}>
@@ -20,6 +22,9 @@ export const CharacterPortrait = observer(({ iconType, health, maxHealth, isVali
             <div className="w-full bg-gray-200 rounded-full mt-1">
                 <div className="bg-red-600 text-xs font-medium text-red-100 text-center p-0.5 leading-none rounded-full" style={{ width: health / maxHealth * 100 + "%" }}> {health}/{maxHealth}</div>
             </div >
+            <div className="flex mt-1">
+                {Object.keys(effects).map(x => <img key={`effects-${iconType}-${x}`} className="w-6 h-6 rounded-md" src={effectIcons[x as any as EffectType]} title={`${EffectType[x as any as EffectType]}: ${effects[x as any as EffectType]}`}/>)}
+            </div>
         </div >
     )
 });
@@ -152,6 +157,7 @@ export const Game = observer(() => {
                             health={character.health}
                             maxHealth={character.maxHealth}
                             isValidTarget={character.isValidTarget}
+                            effects={character.effects}
                             onSelectTarget={() => { if (character.isValidTarget) store.onTargetSelected(character.index) }}
                         />
                     )}
@@ -165,6 +171,7 @@ export const Game = observer(() => {
                                 health={character.health}
                                 maxHealth={character.maxHealth}
                                 isValidTarget={character.isValidTarget}
+                                effects={character.effects}
                                 onSelectTarget={() => { if (character.isValidTarget) store.onTargetSelected(character.index) }}
                             />
                         )}

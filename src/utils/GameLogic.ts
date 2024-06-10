@@ -1,4 +1,4 @@
-import { deepCopy, pick } from "./Helpers";
+import { deepCopy, pick, testChance } from "./Helpers";
 
 export enum IconType {
     Book,
@@ -14,13 +14,18 @@ export enum Element {
     Lightning
 }
 
-export enum Effect {
+export enum EffectType {
     Burn,
-    FlameInfusion,
+    FlameInfuse,
     Freeze,
     Accelerate,
     Electrify,
-    Energize
+    Energize,
+    Guard,
+    Channel,
+    Unarmed,
+    Punctured,
+    Taunt
 }
 
 export enum SkillTarget {
@@ -30,6 +35,11 @@ export enum SkillTarget {
     Any,
     RandomAlly,
     RandomEnemy,
+}
+
+export enum EffectTarget {
+    Self,
+    Target
 }
 
 export enum CharacterType {
@@ -42,6 +52,7 @@ export type Character = {
     speed: number;
     iconType: IconType;
     characterType: CharacterType;
+    element: Element;
 }
 
 export type Enemy = Character & {
@@ -52,11 +63,15 @@ export type Player = Character & {
     skills: PlayerSkill[];
 }
 
-export type CharacterState = {
+export type CharacterStateModifiers = {
+    channelTarget?: number[];
+    channelPotency?: number
+}
+
+export type CharacterState = CharacterStateModifiers & {
     health: number;
     initiative: number;
-    element: Element;
-    effects: { [key in Effect]: number };
+    effects: { [key in EffectType]?: number };
 }
 
 export type EnemyState = Enemy & CharacterState & {
@@ -71,16 +86,23 @@ export type BaseSkill = {
     targetCount: number;
     potency: number;
     effectProcChance: number;
-    tauntPercentage?: number;
 }
 
-export type WeaponSkill = BaseSkill & {
+export type EffectModifier = {
+    effectType: EffectType;
+    chance: number;
+    target: EffectTarget;
 }
 
-export type PlayerSkill = WeaponSkill & {
+export type SkillModifiers = {
+    targetEffectRemoveCount?: number;
+    effectModifiers?: EffectModifier[];
 }
 
-export type EnemySkill = BaseSkill & {
+export type PlayerSkill = BaseSkill & SkillModifiers & {
+}
+
+export type EnemySkill = BaseSkill & SkillModifiers & {
 }
 
 export type GameState = {
@@ -96,15 +118,6 @@ export type SkillActivation = {
 export type EnemyBehaviorMap = {
     skillSelectionFunction: () => number;
     targetingFunctions: ((() => number[]) | null)[]
-}
-
-export const DEFAULT_EFFECTS = {
-    [Effect.Burn]: 0,
-    [Effect.FlameInfusion]: 0,
-    [Effect.Freeze]: 0,
-    [Effect.Accelerate]: 0,
-    [Effect.Electrify]: 0,
-    [Effect.Energize]: 0
 }
 
 export const TURN_THRESHOLD = 100;
@@ -130,7 +143,7 @@ export const getSkillDescription = (skill: BaseSkill) => {
         [SkillTarget.RandomEnemy]: "random enemies"
     }
 
-    const potency = skill.potency > 0 ? `Heal ${skill.potency} to` : `Deal ${skill.potency * -1} damage to`;
+    const potency = skill.potency === 0 ? "Apply effect to" : skill.potency > 0 ? `Heal ${skill.potency} to` : `Deal ${skill.potency * -1} damage to`;
     const target = skill.targetCount === 1 ? singleTargetMap[skill.target] : `${skill.targetCount}  ${multiTargetMap[skill.target]}`;
     return `${skill.name} - ${potency} ${target}`;
 }
@@ -230,13 +243,14 @@ export const getRandomTargets = (gameState: GameState, skillActivation: SkillAct
 
         //Skew chance of picking targets based on taunt/electrify
         [...Array(skill.targetCount)].forEach(() => newSkillActivation.targets.push(pick(validTargets)));
-    }   
+    }
 
     return newSkillActivation;
 }
 
 export const triggerSkill = (gameState: GameState, skillActivation: SkillActivation): GameState => {
     const newState = deepCopy(gameState);
+    const currentCharacter = getCurrentCharacter(gameState);
     const skill = getSelectedSkill(gameState, skillActivation.skillIndex);
 
     skillActivation.targets.forEach(targetIndex => {
@@ -247,6 +261,12 @@ export const triggerSkill = (gameState: GameState, skillActivation: SkillActivat
             target.health = target.maxHealth;
         }
         // Add triggers for life decreasing beyond total
+
+        (skill.effectModifiers ?? []).forEach(effectModifier => {
+            const effectTarget = effectModifier.target === EffectTarget.Self ? currentCharacter : target;
+            const effectCount = Math.floor(effectModifier.chance) + (testChance(effectModifier.chance % 1) ? 1 : 0)
+            effectTarget.effects[effectModifier.effectType] = (target.effects[effectModifier.effectType] || 0) + effectCount;
+        })
     });
 
     newState.characters[gameState.currentCharacterIndex].initiative = 0;
@@ -272,14 +292,24 @@ export const TEST_INITIAL_GAME_STATE: GameState = {
             speed: 17,
             initiative: 17,
             element: Element.Lightning,
-            skills: [{
-                name: "Heal",
-                target: SkillTarget.Ally,
-                targetCount: 1,
-                potency: 20,
-                effectProcChance: 0.1,
-            }],
-            effects: DEFAULT_EFFECTS
+            skills: [
+                {
+                    name: "Heal",
+                    target: SkillTarget.Ally,
+                    targetCount: 1,
+                    potency: 20,
+                    effectProcChance: 0.1,
+                },
+                {
+                    name: "Cleanse",
+                    target: SkillTarget.Ally,
+                    targetCount: 1,
+                    potency: 0,
+                    effectProcChance: 0.2,
+                    targetEffectRemoveCount: 5
+                }]
+            ,
+            effects: {}
         },
         {
             iconType: IconType.Knife,
@@ -289,14 +319,35 @@ export const TEST_INITIAL_GAME_STATE: GameState = {
             speed: 20,
             initiative: 20,
             element: Element.Fire,
-            skills: [{
-                name: "Stab",
-                target: SkillTarget.Enemy,
-                targetCount: 1,
-                potency: -30,
-                effectProcChance: 0.4,
-            }],
-            effects: DEFAULT_EFFECTS
+            skills: [
+                {
+                    name: "Stab",
+                    target: SkillTarget.Enemy,
+                    targetCount: 1,
+                    potency: -30,
+                    effectProcChance: 0.4,
+                },
+                {
+                    name: "Throw",
+                    target: SkillTarget.Enemy,
+                    targetCount: 1,
+                    potency: -20,
+                    effectProcChance: 0.6,
+                    effectModifiers: [
+                        {
+                            effectType: EffectType.Unarmed,
+                            target: EffectTarget.Self,
+                            chance: 1
+                        },
+                        {
+                            effectType: EffectType.Punctured,
+                            target: EffectTarget.Target,
+                            chance: 1
+                        }
+                    ]
+                },
+            ],
+            effects: {}
         },
         {
             iconType: IconType.Shield,
@@ -306,15 +357,42 @@ export const TEST_INITIAL_GAME_STATE: GameState = {
             speed: 19,
             initiative: 19,
             element: Element.Fire,
-            skills: [{
-                name: "Taunt",
-                target: SkillTarget.Enemy,
-                targetCount: 1,
-                potency: -10,
-                effectProcChance: 0.1,
-                tauntPercentage: 0.4,
-            }],
-            effects: DEFAULT_EFFECTS
+            skills: [
+                {
+                    name: "Taunt",
+                    target: SkillTarget.Enemy,
+                    targetCount: 1,
+                    potency: -10,
+                    effectProcChance: 0.1,
+                    effectModifiers: [
+                        {
+                            effectType: EffectType.Taunt,
+                            target: EffectTarget.Self,
+                            chance: 4
+                        }
+                    ]
+                },
+                {
+                    name: "Guard",
+                    target: SkillTarget.Self,
+                    targetCount: 1,
+                    potency: 0,
+                    effectProcChance: 0.2,
+                    effectModifiers: [
+                        {
+                            effectType: EffectType.Taunt,
+                            target: EffectTarget.Self,
+                            chance: 3
+                        },
+                        {
+                            effectType: EffectType.Guard,
+                            target: EffectTarget.Self,
+                            chance: 1
+                        }
+                    ]
+                },
+            ],
+            effects: {}
         },
         {
             iconType: IconType.Staff,
@@ -324,14 +402,30 @@ export const TEST_INITIAL_GAME_STATE: GameState = {
             speed: 18,
             initiative: 18,
             element: Element.Fire,
-            skills: [{
-                name: "Blast",
-                target: SkillTarget.Enemy,
-                targetCount: 5,
-                potency: -15,
-                effectProcChance: 0.3,
-            }],
-            effects: DEFAULT_EFFECTS
+            skills: [
+                {
+                    name: "Blast",
+                    target: SkillTarget.Enemy,
+                    targetCount: 5,
+                    potency: -5,
+                    effectProcChance: 0.3
+                },
+                {
+                    name: "Channel",
+                    target: SkillTarget.Enemy,
+                    targetCount: 3,
+                    potency: -20,
+                    effectProcChance: 0.3,
+                    effectModifiers: [
+                        {
+                            effectType: EffectType.Channel,
+                            target: EffectTarget.Self,
+                            chance: 1
+                        }
+                    ]
+                }
+            ],
+            effects: {}
         },
         {
             iconType: IconType.Enemy1,
@@ -357,7 +451,7 @@ export const TEST_INITIAL_GAME_STATE: GameState = {
                     effectProcChance: 0.1
                 }
             ],
-            effects: DEFAULT_EFFECTS
+            effects: {}
         }
     ],
     currentCharacterIndex: 1

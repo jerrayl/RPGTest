@@ -8,3 +8,7 @@ export function pick(arr: number[]): number {
     }
     return arr[Math.floor(Math.random() * arr.length)];
 }
+
+export function testChance(x: number): boolean {
+    return Math.random() < x;
+}
