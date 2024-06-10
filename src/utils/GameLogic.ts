@@ -81,7 +81,6 @@ export type PlayerSkill = WeaponSkill & {
 }
 
 export type EnemySkill = BaseSkill & {
-    activationFunction: (() => number[]) | null;
 }
 
 export type GameState = {
@@ -92,6 +91,11 @@ export type GameState = {
 export type SkillActivation = {
     skillIndex: number;
     targets: number[];
+}
+
+export type EnemyBehaviorMap = {
+    skillSelectionFunction: () => number;
+    targetingFunctions: ((() => number[]) | null)[]
 }
 
 export const DEFAULT_EFFECTS = {
@@ -131,12 +135,22 @@ export const getSkillDescription = (skill: BaseSkill) => {
     return `${skill.name} - ${potency} ${target}`;
 }
 
-export const getCurrentCharacter = (gameState: GameState) => {
+export const getCurrentCharacter = (gameState: GameState): PlayerState | EnemyState => {
     return gameState.characters[gameState.currentCharacterIndex];
 }
 
 export const getSelectedSkill = (gameState: GameState, skillIndex: number) => {
     return getCurrentCharacter(gameState).skills[skillIndex];
+}
+
+export const filterCharacters = (characters: (PlayerState | EnemyState)[], characterType: CharacterType) => {
+    return characters
+        .map((character, i) => character.characterType === characterType ? i : null)
+        .filter(x => x !== null) as number[];
+}
+
+export const flipCharacterType = (characterType: CharacterType) => {
+    return characterType === CharacterType.Player ? CharacterType.Enemy : CharacterType.Player;
 }
 
 export const getValidTargets = (gameState: GameState, skillIndex: number): number[] => {
@@ -147,29 +161,31 @@ export const getValidTargets = (gameState: GameState, skillIndex: number): numbe
         return [gameState.currentCharacterIndex];
     }
 
-    if (skill.target === SkillTarget.Any) {
+    if (skillIsRandom(skill) || skill.target === SkillTarget.Any) {
         return gameState.characters.map((_, i) => i);
     }
 
     if (skill.target === SkillTarget.Ally) {
-        return gameState.characters
-            .map((character, i) => character.characterType === currentCharacter.characterType ? i : null)
-            .filter(x => x !== null) as number[];
-
+        return filterCharacters(gameState.characters, currentCharacter.characterType);
     }
 
     if (skill.target === SkillTarget.Enemy) {
-        return gameState.characters
-            .map((character, i) => character.characterType !== currentCharacter.characterType ? i : null)
-            .filter(x => x !== null) as number[];
+        return filterCharacters(gameState.characters, flipCharacterType(currentCharacter.characterType));
     }
 
     throw Error("Invalid argument");
 }
 
+export const getEnemySkillActivation = (gameState: GameState): SkillActivation => {
+    const behaviors = ENEMY_BEHAVIORS[getCurrentCharacter(gameState).iconType]!;
+    const skillIndex = behaviors.skillSelectionFunction();
+    const targetingFunction = behaviors.targetingFunctions[skillIndex];
+    return { skillIndex: skillIndex, targets: targetingFunction ? targetingFunction() : [] };
+}
+
 export const advanceTurnOrder = (gameState: GameState): GameState => {
     const newState = deepCopy(gameState);
-    while(newState.characters.filter(x => x.initiative > TURN_THRESHOLD).length === 0){
+    while (newState.characters.filter(x => x.initiative > TURN_THRESHOLD).length === 0) {
         newState.characters.forEach(character => {
             character.initiative += character.speed;
             //Todo: Add effect modifiers
@@ -178,23 +194,45 @@ export const advanceTurnOrder = (gameState: GameState): GameState => {
 
     const maxInitiativeCharacters = newState.characters.reduce((acc, char, index) => {
         if (acc.maxInitiative < char.initiative) {
-          acc.maxInitiative = char.initiative;
-          acc.indexes = [index];
+            acc.maxInitiative = char.initiative;
+            acc.indexes = [index];
         } else if (acc.maxInitiative === char.initiative) {
-          acc.indexes.push(index);
+            acc.indexes.push(index);
         }
         return acc;
-      }, { maxInitiative: Number.MIN_SAFE_INTEGER, indexes: [] as number[] });
-    
+    }, { maxInitiative: Number.MIN_SAFE_INTEGER, indexes: [] as number[] });
+
     newState.currentCharacterIndex = pick(maxInitiativeCharacters.indexes);
     return newState;
+}
+
+export const skillIsRandom = (skill: BaseSkill) => {
+    return [SkillTarget.RandomAlly, SkillTarget.RandomEnemy].includes(skill.target);
 }
 
 export const canTriggerSkill = (gameState: GameState, skillActivation: SkillActivation) => {
     const skill = getSelectedSkill(gameState, skillActivation.skillIndex);
 
-    return [SkillTarget.RandomAlly, SkillTarget.RandomEnemy].includes(skill.target) || 
+    return skillIsRandom(skill) ||
         skill.targetCount === skillActivation.targets.length;
+}
+
+export const getRandomTargets = (gameState: GameState, skillActivation: SkillActivation): SkillActivation => {
+    const newSkillActivation = deepCopy(skillActivation);
+    const currentCharacter = getCurrentCharacter(gameState);
+    const skill = getSelectedSkill(gameState, skillActivation.skillIndex);
+
+    if (skillIsRandom(skill)) {
+        const validTargets = filterCharacters(gameState.characters, skill.target === SkillTarget.RandomAlly
+            ? currentCharacter.characterType
+            : flipCharacterType(currentCharacter.characterType)
+        );
+
+        //Skew chance of picking targets based on taunt/electrify
+        [...Array(skill.targetCount)].forEach(() => newSkillActivation.targets.push(pick(validTargets)));
+    }   
+
+    return newSkillActivation;
 }
 
 export const triggerSkill = (gameState: GameState, skillActivation: SkillActivation): GameState => {
@@ -202,13 +240,26 @@ export const triggerSkill = (gameState: GameState, skillActivation: SkillActivat
     const skill = getSelectedSkill(gameState, skillActivation.skillIndex);
 
     skillActivation.targets.forEach(targetIndex => {
-        newState.characters[targetIndex].health += skill.potency;
-        // Add triggers for life increasing/decreasing beyond total
+        const target = newState.characters[targetIndex];
+        target.health += skill.potency;
+
+        if (target.health > target.maxHealth) {
+            target.health = target.maxHealth;
+        }
+        // Add triggers for life decreasing beyond total
     });
 
     newState.characters[gameState.currentCharacterIndex].initiative = 0;
 
     return newState;
+}
+
+
+export const ENEMY_BEHAVIORS: { [key in IconType]?: EnemyBehaviorMap } = {
+    [IconType.Enemy1]: {
+        skillSelectionFunction: () => pick([0, 1]),
+        targetingFunctions: [null, () => [0, 1, 2, 3]]
+    }
 }
 
 export const TEST_INITIAL_GAME_STATE: GameState = {
@@ -296,16 +347,14 @@ export const TEST_INITIAL_GAME_STATE: GameState = {
                     target: SkillTarget.RandomEnemy,
                     targetCount: 1,
                     potency: -20,
-                    effectProcChance: 0.5,
-                    activationFunction: null
+                    effectProcChance: 0.5
                 },
                 {
                     name: "Small bonks",
                     target: SkillTarget.Enemy,
                     targetCount: 4,
                     potency: -5,
-                    effectProcChance: 0.1,
-                    activationFunction: () => [0, 1, 2, 3]
+                    effectProcChance: 0.1
                 }
             ],
             effects: DEFAULT_EFFECTS
