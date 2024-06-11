@@ -1,11 +1,10 @@
 import React from "react";
 import { computed, makeObservable, observable, action, IObservableArray } from "mobx";
-import { CharacterType, GameState, IconType, SkillActivation, TEST_INITIAL_GAME_STATE, advanceTurnOrder, canTriggerSkill, getCurrentCharacter, getEnemySkillActivation, getRandomTargets, getSelectedSkill, getValidTargets, triggerSkill } from "../utils/GameLogic";
+import { CharacterType, GameHistory, GameState, IconType, SkillActivation, TEST_INITIAL_GAME_STATE, advanceTurnOrder, canTriggerSkill, getCurrentCharacter, getEnemySkillActivation, getRandomTargets, getSelectedSkill, getTurnOrder, getValidTargets, triggerSkill } from "../utils/GameLogic";
 
-export type ActionHistory = {
-    characterIcon: IconType;
-    skillName: string;
-    targets: { [key in IconType]?: number};
+export type TurnOrderCharacter = {
+    iconType: IconType;
+    turnOrderDescription: string;
 }
 
 export class GameStore {
@@ -15,15 +14,11 @@ export class GameStore {
 
     @observable gameState: GameState = TEST_INITIAL_GAME_STATE;
     @observable selectedSkillActivation: SkillActivation | null = null;
-    @observable actionHistory: IObservableArray<ActionHistory> = observable.array();
-    @observable actionHistoryHovered = false;
+    @observable gameHistoryHovered = false;
 
     @computed
     get turnOrder() {
-        //TODO: move to gamelogic
-        const sortedState = [...this.gameState.characters];
-        sortedState.sort((a, b) => b.initiative - a.initiative);
-        return sortedState.map(x => x.iconType);
+        return getTurnOrder(this.gameState);
     }
 
     @computed
@@ -49,22 +44,19 @@ export class GameStore {
     @computed
     get selectedTargets() {
         return this.selectedSkillActivation
-            ? this.selectedSkillActivation.targets.reduce((acc: { [key in IconType]?: number }, index) => {
-                acc[this.characters[index].iconType] = (acc[this.characters[index].iconType] || 0) + 1;
-                return acc;
-            }, {})
+            ? this.selectedSkillActivation.targets
             : null;
     }
 
     @action.bound
     onSkillSelected = (skillIndex: number) => {
-        this.selectedSkillActivation = { skillIndex: skillIndex, targets: [] };
+        this.selectedSkillActivation = { skillIndex: skillIndex, targets: {} };
         this.triggerSkill();
     }
 
     @action.bound
     onTargetSelected = (targetIndex: number) => {
-        this.selectedSkillActivation!.targets.push(targetIndex);
+        this.selectedSkillActivation!.targets[targetIndex] = (this.selectedSkillActivation!.targets[targetIndex] ?? 0) + 1;
         this.triggerSkill();
     }
 
@@ -73,13 +65,11 @@ export class GameStore {
         if (!this.selectedSkillActivation) {
             return;
         }
-
         if (canTriggerSkill(this.gameState, this.selectedSkillActivation)) {
             this.selectedSkillActivation = getRandomTargets(this.gameState, this.selectedSkillActivation)
-            this.actionHistory.push({characterIcon: this.currentCharacter.iconType, skillName: this.selectedSkill!.name, targets: this.selectedTargets!})
             this.gameState = triggerSkill(this.gameState, this.selectedSkillActivation);
             this.advanceTurnOrder();
-            
+
             if (this.currentCharacter.characterType === CharacterType.Enemy) {
                 this.selectedSkillActivation = getEnemySkillActivation(this.gameState);
                 this.triggerSkill();

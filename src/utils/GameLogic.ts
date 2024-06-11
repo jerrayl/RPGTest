@@ -1,4 +1,5 @@
-import { deepCopy, pick, testChance } from "./Helpers";
+import { TurnOrderCharacter } from "../stores/GameStore";
+import { deepCopy, flattenNumberMap, pick, sum, testChance } from "./Helpers";
 
 export enum IconType {
     Book,
@@ -47,6 +48,11 @@ export enum CharacterType {
     Enemy
 }
 
+export enum ActorType {
+    Character,
+    Effect
+}
+
 export type Character = {
     maxHealth: number;
     speed: number;
@@ -85,7 +91,7 @@ export type BaseSkill = {
     target: SkillTarget;
     targetCount: number;
     potency: number;
-    effectProcChance: number;
+    elementProcChance: number;
 }
 
 export type EffectModifier = {
@@ -105,19 +111,30 @@ export type PlayerSkill = BaseSkill & SkillModifiers & {
 export type EnemySkill = BaseSkill & SkillModifiers & {
 }
 
+export type Targets = { [key: number]: number };
+
+export type GameHistory = {
+    actor: number | EffectType;
+    actorType: ActorType;
+    actionName: string | null;
+    targets: Targets;
+    potency: number;
+}
+
 export type GameState = {
     characters: (PlayerState | EnemyState)[];
     currentCharacterIndex: number;
+    gameHistory: GameHistory[];
 }
 
 export type SkillActivation = {
     skillIndex: number;
-    targets: number[];
+    targets: Targets;
 }
 
 export type EnemyBehaviorMap = {
     skillSelectionFunction: () => number;
-    targetingFunctions: ((() => number[]) | null)[]
+    targetingFunctions: ((() => Targets) | null)[]
 }
 
 export const TURN_THRESHOLD = 100;
@@ -193,15 +210,14 @@ export const getEnemySkillActivation = (gameState: GameState): SkillActivation =
     const behaviors = ENEMY_BEHAVIORS[getCurrentCharacter(gameState).iconType]!;
     const skillIndex = behaviors.skillSelectionFunction();
     const targetingFunction = behaviors.targetingFunctions[skillIndex];
-    return { skillIndex: skillIndex, targets: targetingFunction ? targetingFunction() : [] };
+    return { skillIndex: skillIndex, targets: targetingFunction ? targetingFunction() : {} };
 }
 
 export const advanceTurnOrder = (gameState: GameState): GameState => {
     const newState = deepCopy(gameState);
     while (newState.characters.filter(x => x.initiative > TURN_THRESHOLD).length === 0) {
         newState.characters.forEach(character => {
-            character.initiative += character.speed;
-            //Todo: Add effect modifiers
+            character.initiative += character.speed - (character.effects[EffectType.Freeze] ?? 0) + (character.effects[EffectType.Accelerate] ?? 0);
         });
     }
 
@@ -219,6 +235,12 @@ export const advanceTurnOrder = (gameState: GameState): GameState => {
     return newState;
 }
 
+export const getTurnOrder = (gameState: GameState): TurnOrderCharacter[] => {
+    const newState = deepCopy(gameState);
+    newState.characters.sort((a, b) => b.initiative - a.initiative);
+    return newState.characters.map(x => ({ iconType: x.iconType, turnOrderDescription: `Initiative: ${x.initiative} Speed: ${x.speed} +${x.effects[EffectType.Accelerate] ?? 0} -${x.effects[EffectType.Freeze] ?? 0}` }));
+}
+
 export const skillIsRandom = (skill: BaseSkill) => {
     return [SkillTarget.RandomAlly, SkillTarget.RandomEnemy].includes(skill.target);
 }
@@ -227,7 +249,7 @@ export const canTriggerSkill = (gameState: GameState, skillActivation: SkillActi
     const skill = getSelectedSkill(gameState, skillActivation.skillIndex);
 
     return skillIsRandom(skill) ||
-        skill.targetCount === skillActivation.targets.length;
+        skill.targetCount === sum(Object.values(skillActivation.targets));
 }
 
 export const getRandomTargets = (gameState: GameState, skillActivation: SkillActivation): SkillActivation => {
@@ -242,34 +264,72 @@ export const getRandomTargets = (gameState: GameState, skillActivation: SkillAct
         );
 
         //Skew chance of picking targets based on taunt/electrify
-        [...Array(skill.targetCount)].forEach(() => newSkillActivation.targets.push(pick(validTargets)));
+        [...Array(skill.targetCount)].forEach(() => {
+            const targetIndex = pick(validTargets);
+            newSkillActivation.targets[targetIndex] = (newSkillActivation.targets[targetIndex] ?? 0) + 1
+        });
     }
 
     return newSkillActivation;
 }
 
+export const getElementalEffectModifier = (element: Element, skill: PlayerSkill | EnemySkill): EffectModifier => {
+    const elementEffectMap = {
+        [Element.Fire]: [EffectType.FlameInfuse, EffectType.Burn],
+        [Element.Ice]: [EffectType.Accelerate, EffectType.Freeze],
+        [Element.Lightning]: [EffectType.Energize, EffectType.Electrify]
+    }
+
+    return {
+        effectType: elementEffectMap[element][skill.potency >= 0 ? 0 : 1],
+        chance: skill.elementProcChance,
+        target: EffectTarget.Target
+    }
+}
+
 export const triggerSkill = (gameState: GameState, skillActivation: SkillActivation): GameState => {
     const newState = deepCopy(gameState);
-    const currentCharacter = getCurrentCharacter(gameState);
     const skill = getSelectedSkill(gameState, skillActivation.skillIndex);
+    const currentCharacter = getCurrentCharacter(newState);
 
-    skillActivation.targets.forEach(targetIndex => {
+    const potency = skill.potency;
+
+    flattenNumberMap(skillActivation.targets).forEach(targetIndex => {
         const target = newState.characters[targetIndex];
         target.health += skill.potency;
 
+        // Prevent overheal
         if (target.health > target.maxHealth) {
             target.health = target.maxHealth;
         }
-        // Add triggers for life decreasing beyond total
 
-        (skill.effectModifiers ?? []).forEach(effectModifier => {
+        // TODO: Add triggers for life decreasing beyond total
+
+        const elementModifier = getElementalEffectModifier(currentCharacter.element, skill);
+
+        ([elementModifier].concat(skill.effectModifiers ?? [])).forEach(effectModifier => {
             const effectTarget = effectModifier.target === EffectTarget.Self ? currentCharacter : target;
-            const effectCount = Math.floor(effectModifier.chance) + (testChance(effectModifier.chance % 1) ? 1 : 0)
-            effectTarget.effects[effectModifier.effectType] = (target.effects[effectModifier.effectType] || 0) + effectCount;
+            const effectCount = Math.floor(effectModifier.chance) + (testChance(effectModifier.chance % 1) ? 1 : 0);
+            effectTarget.effects[effectModifier.effectType] = (target.effects[effectModifier.effectType] ?? 0) + effectCount;
         })
     });
 
+    //Trigger burn damage
+    const burnPotency = currentCharacter.effects[EffectType.Burn];
+    if (burnPotency) {
+        currentCharacter.health -= burnPotency;
+        newState.gameHistory.push({ actor: EffectType.Burn, actorType: ActorType.Effect, actionName: null, potency: burnPotency, targets: { [gameState.currentCharacterIndex]: 0 } });
+    }
+
+    //Tick down all effects by 1
+    Object.keys(currentCharacter.effects).forEach(x => {
+        const effectType = x as any as EffectType
+        currentCharacter.effects[effectType] = Math.max(currentCharacter.effects[effectType]! - 1, 0);
+    });
+
     newState.characters[gameState.currentCharacterIndex].initiative = 0;
+
+    newState.gameHistory.push({ actor: currentCharacter.iconType, actorType: ActorType.Character, actionName: skill.name, potency: potency, targets: skillActivation.targets });
 
     return newState;
 }
@@ -278,7 +338,7 @@ export const triggerSkill = (gameState: GameState, skillActivation: SkillActivat
 export const ENEMY_BEHAVIORS: { [key in IconType]?: EnemyBehaviorMap } = {
     [IconType.Enemy1]: {
         skillSelectionFunction: () => pick([0, 1]),
-        targetingFunctions: [null, () => [0, 1, 2, 3]]
+        targetingFunctions: [null, () => ({ [0]: 1, [1]: 1, [2]: 1, [3]: 1 })]
     }
 }
 
@@ -298,14 +358,14 @@ export const TEST_INITIAL_GAME_STATE: GameState = {
                     target: SkillTarget.Ally,
                     targetCount: 1,
                     potency: 20,
-                    effectProcChance: 0.1,
+                    elementProcChance: 0.1,
                 },
                 {
                     name: "Cleanse",
                     target: SkillTarget.Ally,
                     targetCount: 1,
                     potency: 0,
-                    effectProcChance: 0.2,
+                    elementProcChance: 0.2,
                     targetEffectRemoveCount: 5
                 }]
             ,
@@ -325,14 +385,14 @@ export const TEST_INITIAL_GAME_STATE: GameState = {
                     target: SkillTarget.Enemy,
                     targetCount: 1,
                     potency: -30,
-                    effectProcChance: 0.4,
+                    elementProcChance: 0.4,
                 },
                 {
                     name: "Throw",
                     target: SkillTarget.Enemy,
                     targetCount: 1,
                     potency: -20,
-                    effectProcChance: 0.6,
+                    elementProcChance: 0.6,
                     effectModifiers: [
                         {
                             effectType: EffectType.Unarmed,
@@ -363,7 +423,7 @@ export const TEST_INITIAL_GAME_STATE: GameState = {
                     target: SkillTarget.Enemy,
                     targetCount: 1,
                     potency: -10,
-                    effectProcChance: 0.1,
+                    elementProcChance: 0.1,
                     effectModifiers: [
                         {
                             effectType: EffectType.Taunt,
@@ -377,7 +437,7 @@ export const TEST_INITIAL_GAME_STATE: GameState = {
                     target: SkillTarget.Self,
                     targetCount: 1,
                     potency: 0,
-                    effectProcChance: 0.2,
+                    elementProcChance: 0.2,
                     effectModifiers: [
                         {
                             effectType: EffectType.Taunt,
@@ -408,14 +468,14 @@ export const TEST_INITIAL_GAME_STATE: GameState = {
                     target: SkillTarget.Enemy,
                     targetCount: 5,
                     potency: -5,
-                    effectProcChance: 0.3
+                    elementProcChance: 0.3
                 },
                 {
                     name: "Channel",
                     target: SkillTarget.Enemy,
                     targetCount: 3,
                     potency: -20,
-                    effectProcChance: 0.3,
+                    elementProcChance: 0.3,
                     effectModifiers: [
                         {
                             effectType: EffectType.Channel,
@@ -441,18 +501,19 @@ export const TEST_INITIAL_GAME_STATE: GameState = {
                     target: SkillTarget.RandomEnemy,
                     targetCount: 1,
                     potency: -20,
-                    effectProcChance: 0.5
+                    elementProcChance: 0.5
                 },
                 {
                     name: "Small bonks",
                     target: SkillTarget.Enemy,
                     targetCount: 4,
                     potency: -5,
-                    effectProcChance: 0.1
+                    elementProcChance: 0.1
                 }
             ],
             effects: {}
         }
     ],
-    currentCharacterIndex: 1
+    currentCharacterIndex: 1,
+    gameHistory: []
 }
