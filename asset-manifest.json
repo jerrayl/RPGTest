@@ -1,7 +1,7 @@
 {
   "files": {
     "main.css": "/RPGTest/static/css/main.873833fb.css",
-    "main.js": "/RPGTest/static/js/main.28554ac7.js",
+    "main.js": "/RPGTest/static/js/main.7225ff6d.js",
     "static/js/496.b741f3e2.chunk.js": "/RPGTest/static/js/496.b741f3e2.chunk.js",
     "static/media/taunt.png": "/RPGTest/static/media/taunt.9d4c27641b30b4675211.png",
     "static/media/flameInfuse.png": "/RPGTest/static/media/flameInfuse.16f96e1731f30e9d0ffe.png",
@@ -21,11 +21,11 @@
     "static/media/punctured.png": "/RPGTest/static/media/punctured.c14f7e685c719c129834.png",
     "index.html": "/RPGTest/index.html",
     "main.873833fb.css.map": "/RPGTest/static/css/main.873833fb.css.map",
-    "main.28554ac7.js.map": "/RPGTest/static/js/main.28554ac7.js.map",
+    "main.7225ff6d.js.map": "/RPGTest/static/js/main.7225ff6d.js.map",
     "496.b741f3e2.chunk.js.map": "/RPGTest/static/js/496.b741f3e2.chunk.js.map"
   },
   "entrypoints": [
     "static/css/main.873833fb.css",
-    "static/js/main.28554ac7.js"
+    "static/js/main.7225ff6d.js"
   ]
 }
