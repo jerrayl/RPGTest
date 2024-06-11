@@ -1,0 +1,31 @@
+{
+  "files": {
+    "main.css": "/RPGTest/static/css/main.873833fb.css",
+    "main.js": "/RPGTest/static/js/main.28554ac7.js",
+    "static/js/496.b741f3e2.chunk.js": "/RPGTest/static/js/496.b741f3e2.chunk.js",
+    "static/media/taunt.png": "/RPGTest/static/media/taunt.9d4c27641b30b4675211.png",
+    "static/media/flameInfuse.png": "/RPGTest/static/media/flameInfuse.16f96e1731f30e9d0ffe.png",
+    "static/media/unarmed.png": "/RPGTest/static/media/unarmed.b0544b31abffc19c1c30.png",
+    "static/media/channel.png": "/RPGTest/static/media/channel.545d015ea5ab4ba64bea.png",
+    "static/media/guard.png": "/RPGTest/static/media/guard.36e2dd3b84f52c7ede8b.png",
+    "static/media/book.png": "/RPGTest/static/media/book.da58ab186fb0a9abe416.png",
+    "static/media/shield.png": "/RPGTest/static/media/shield.32ff0b9ea592b4ae4e0c.png",
+    "static/media/accelerate.png": "/RPGTest/static/media/accelerate.b397a6619eee935dbf76.png",
+    "static/media/freeze.png": "/RPGTest/static/media/freeze.2a348698ceab4076fc6b.png",
+    "static/media/energize.png": "/RPGTest/static/media/energize.dac8e54e29e3668f2630.png",
+    "static/media/electrify.png": "/RPGTest/static/media/electrify.7fffc61df5e296a816ce.png",
+    "static/media/burn.png": "/RPGTest/static/media/burn.08b393ad74836bef931a.png",
+    "static/media/enemy1.png": "/RPGTest/static/media/enemy1.e067d535dda9bd424d40.png",
+    "static/media/staff.png": "/RPGTest/static/media/staff.0774d858d083f678c215.png",
+    "static/media/knife.png": "/RPGTest/static/media/knife.ee9b045a1a6741c5ef5d.png",
+    "static/media/punctured.png": "/RPGTest/static/media/punctured.c14f7e685c719c129834.png",
+    "index.html": "/RPGTest/index.html",
+    "main.873833fb.css.map": "/RPGTest/static/css/main.873833fb.css.map",
+    "main.28554ac7.js.map": "/RPGTest/static/js/main.28554ac7.js.map",
+    "496.b741f3e2.chunk.js.map": "/RPGTest/static/js/496.b741f3e2.chunk.js.map"
+  },
+  "entrypoints": [
+    "static/css/main.873833fb.css",
+    "static/js/main.28554ac7.js"
+  ]
+}
